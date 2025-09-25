@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Rialo Racing — Rethink & Rebuild</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{margin:0;background:#111;display:flex;justify-content:center;align-items:center;height:100vh}
+    canvas{background:#e9e4d6;border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,.6)}
+    #hud{position:fixed;top:12px;left:12px;color:#fff;font-family:sans-serif;font-weight:bold}
+    #hud div{margin:6px 0}
+    .overlay{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.8);color:#fff;padding:20px;border-radius:10px;text-align:center}
+    .hidden{display:none}
+    button{padding:8px 14px;border-radius:6px;border:0;background:#2b6fb5;color:#fff;cursor:pointer}
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div id="score">Score: 0</div>
+    <div id="speed">Speed: 120</div>
+  </div>
+  <canvas id="game" width="360" height="640"></canvas>
+  <div id="gameOver" class="overlay hidden">
+    <h2>Game Over</h2>
+    <p id="finalScore">Score: 0</p>
+    <button id="restart">Restart</button>
+  </div>
+
+  <script>
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  const ROAD = { x: 80, width: 200, height: canvas.height };
+  const LANES = 3;
+  const laneWidth = ROAD.width / LANES;
+  const laneCenters = Array.from({length:LANES}, (_,i)=>ROAD.x+laneWidth/2+i*laneWidth);
+
+  let state = {
+    running:true,
+    speed:120,
+    score:0,
+    playerLane:1,
+    playerW:40, playerH:40,
+    obstacles:[],
+    lastSpawn:0,
+    spawnInterval:1200,
+    lastFrame:performance.now(),
+    roadOffset:0
+  };
+
+  // input
+  document.addEventListener("keydown", e=>{
+    if(e.key==="ArrowLeft") state.playerLane=Math.max(0,state.playerLane-1);
+    if(e.key==="ArrowRight") state.playerLane=Math.min(LANES-1,state.playerLane+1);
+  });
+
+  // spawn enemy
+  function spawnObstacle(){
+    const lane = Math.floor(Math.random()*LANES);
+    const size = 28+Math.random()*12; // smaller size
+    const ob = {x:laneCenters[lane]-size/2,y:-50,w:size,h:size,speed:state.speed};
+    // give one-time horizontal shift
+    ob.shiftDir = Math.random()<0.5?-1:1;
+    ob.shiftDone = false;
+    state.obstacles.push(ob);
+  }
+
+  // update
+  function update(dt,now){
+    if(now-state.lastSpawn>state.spawnInterval){
+      spawnObstacle();
+      state.lastSpawn=now;
+      if(state.spawnInterval>500) state.spawnInterval-=20;
+      state.speed+=1;
+    }
+    state.roadOffset += state.speed*dt*0.5;
+
+    for(let i=state.obstacles.length-1;i>=0;i--){
+      const ob=state.obstacles[i];
+      ob.y+=ob.speed*dt;
+
+      // shift sideways only once
+      if(!ob.shiftDone && ob.y>100){
+        ob.x += ob.shiftDir*laneWidth;
+        ob.x = Math.max(ROAD.x,Math.min(ROAD.x+ROAD.width-ob.w,ob.x));
+        ob.shiftDone=true;
+      }
+
+      if(ob.y>canvas.height+50){
+        state.obstacles.splice(i,1);
+        state.score+=10;
+      }
+    }
+
+    // collision
+    const player={x:laneCenters[state.playerLane]-state.playerW/2,y:canvas.height-120,w:state.playerW,h:state.playerH};
+    for(const ob of state.obstacles){
+      if(!(ob.x>player.x+player.w||ob.x+ob.w<player.x||ob.y>player.y+player.h||ob.y+ob.h<player.y)){
+        state.running=false;showGameOver();
+      }
+    }
+  }
+
+  // draw
+  function drawRoad(){
+    ctx.fillStyle="#e9e4d6";
+    ctx.fillRect(ROAD.x,0,ROAD.width,canvas.height);
+
+    ctx.fillStyle="#bdb7a1";
+    ctx.fillRect(ROAD.x-6,0,6,canvas.height);
+    ctx.fillRect(ROAD.x+ROAD.width,0,6,canvas.height);
+
+    ctx.fillStyle="#333";
+    ctx.font="bold 20px sans-serif";
+    ctx.textAlign="center";
+    const words=["RETHINK","REBUILD","RIALO"];
+    const spacing=120;
+    for(let i=-spacing;i<canvas.height+spacing;i+=spacing){
+      const word=words[Math.floor((i+state.roadOffset)/spacing)%words.length];
+      ctx.fillText(word,ROAD.x+ROAD.width/2,(i+state.roadOffset)% (canvas.height+spacing));
+    }
+  }
+
+  function drawPlayer(){
+    const x=laneCenters[state.playerLane]-state.playerW/2;
+    const y=canvas.height-120;
+    ctx.fillStyle="#2b6fb5";
+    ctx.fillRect(x,y,state.playerW,state.playerH);
+  }
+
+  function drawObstacle(ob){
+    ctx.fillStyle="#c94c4c";
+    ctx.fillRect(ob.x,ob.y,ob.w,ob.h);
+  }
+
+  function render(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle="#d9d6c7";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    drawRoad();
+    for(const ob of state.obstacles) drawObstacle(ob);
+    drawPlayer();
+
+    document.getElementById("score").textContent="Score: "+state.score;
+    document.getElementById("speed").textContent="Speed: "+Math.round(state.speed);
+  }
+
+  function tick(now){
+    const dt=(now-state.lastFrame)/1000;
+    state.lastFrame=now;
+    if(state.running){
+      update(dt,now);
+      render();
+      requestAnimationFrame(tick);
+    }
+  }
+
+  function showGameOver(){
+    document.getElementById("finalScore").textContent="Score: "+state.score;
+    document.getElementById("gameOver").classList.remove("hidden");
+  }
+
+  document.getElementById("restart").onclick=()=>{
+    state={running:true,speed:120,score:0,playerLane:1,playerW:40,playerH:40,obstacles:[],lastSpawn:0,spawnInterval:1200,lastFrame:performance.now(),roadOffset:0};
+    document.getElementById("gameOver").classList.add("hidden");
+    requestAnimationFrame(tick);
+  };
+
+  state.lastFrame=performance.now();
+  requestAnimationFrame(tick);
+  </script>
+</body>
+</html>
